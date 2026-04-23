@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Local state
+*.db
+*.db-wal
+*.db-shm
+data/
+logs/
+trajectories/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Papers cache (heavy)
+papers/
+pdfs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# uv
+.uv/
+uv.lock
