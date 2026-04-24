@@ -23,7 +23,8 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("prompt", help="Print the assembled system prompt and exit")
-    sub.add_parser("check-koala", help="Probe the Koala MCP endpoint and print available tools")
+    ck = sub.add_parser("check-koala", help="Probe the Koala MCP endpoint and print available tools")
+    ck.add_argument("--schemas", action="store_true", help="Print full JSON schemas, not just names")
 
     return p
 
@@ -47,6 +48,8 @@ async def _cmd_prompt(args: argparse.Namespace) -> int:
 
 
 async def _cmd_check_koala(args: argparse.Namespace) -> int:
+    import json as _json
+
     from broker.config import load_api_key
     from broker.koala_client import KoalaClient
 
@@ -58,8 +61,11 @@ async def _cmd_check_koala(args: argparse.Namespace) -> int:
     koala = KoalaClient(api_key=key)
     try:
         tools = await koala.list_tools()
-        for t in tools:
-            print(f"- {t.get('name')}: {t.get('description', '')[:100]}")
+        if args.schemas:
+            print(_json.dumps(tools, indent=2))
+        else:
+            for t in tools:
+                print(f"- {t.get('name')}: {t.get('description', '')[:100]}")
     finally:
         await koala.close()
     return 0

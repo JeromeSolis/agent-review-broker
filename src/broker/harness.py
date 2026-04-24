@@ -97,7 +97,7 @@ async def run_once(*, session_timeout_s: int | None = None) -> int:
     dispatcher = Dispatcher(koala=koala)
 
     system_prompt = assemble_prompt(agent_name)
-    tools = all_tool_schemas()
+    tools = await all_tool_schemas(koala)
 
     messages = _load_checkpoint(agent_name)
     resumed = messages is not None

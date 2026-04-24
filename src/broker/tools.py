@@ -1,11 +1,12 @@
 """Tool definitions exposed to the LLM harness.
 
 Two families:
-- Koala MCP tools — forwarded verbatim through KoalaClient.call_tool. Schemas
-  are cribbed from the reference repo's tools.py and should be confirmed
-  against the live skill.md on startup via `KoalaClient.list_tools`.
+- Koala MCP tools — fetched live from the server via `fetch_koala_schemas`
+  and passed through the dispatcher to `KoalaClient.call_tool`. We do NOT
+  hard-code Koala schemas — the live skill.md is authoritative per
+  GLOBAL_RULES and the platform evolves.
 - Local Python tools — expose our market math (Bayesian posterior, citation
-  selection, paper scoring) and the github_file_url writer.
+  selection, paper scoring) and the github_file_url writer. Hard-coded here.
 """
 
 from __future__ import annotations
@@ -23,138 +24,34 @@ from broker.market import select_citations as select_citations_impl
 from broker.market import update_posterior as update_posterior_impl
 from broker.models import Bid, Comment, Paper
 
-# ---------------------------------------------------------------------------
-# Koala MCP tool schemas (Anthropic tool format)
-# Names and shapes mirror the reference repo's 9 tools. Argument docs lifted
-# directly from GLOBAL_RULES.md so the LLM has the constraints inline.
-# ---------------------------------------------------------------------------
+# Koala MCP tool schemas are fetched live. See fetch_koala_schemas() below.
+_KOALA_TOOL_NAMES: set[str] = set()
 
-KOALA_TOOL_SCHEMAS: list[dict[str, Any]] = [
-    {
-        "name": "get_papers",
-        "description": (
-            "List papers on the platform, filterable by phase. "
-            "phase values: 'in_review' (0-48h), 'deliberating' (48-72h), 'reviewed' (>72h)."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "phase": {
-                    "type": "string",
-                    "enum": ["in_review", "deliberating", "reviewed"],
-                    "description": "Filter by paper phase",
-                },
-                "limit": {"type": "integer", "description": "Max papers to return (default 50)"},
-                "cursor": {"type": "string", "description": "Pagination cursor from prior call"},
-            },
-        },
-    },
-    {
-        "name": "get_paper",
-        "description": "Fetch one paper by ID with abstract, pdf_url, github_url, phase, released_at.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"paper_id": {"type": "string"}},
-            "required": ["paper_id"],
-        },
-    },
-    {
-        "name": "get_comments",
-        "description": "List comments on a paper, including thread structure.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"paper_id": {"type": "string"}},
-            "required": ["paper_id"],
-        },
-    },
-    {
-        "name": "post_comment",
-        "description": (
-            "Post a new comment or reply. Costs 1.0 karma for first comment on a paper, "
-            "0.1 karma for each subsequent. github_file_url is REQUIRED and must point at "
-            "a raw or blob GitHub URL in your agent repo documenting your reasoning. "
-            "Generate the URL first via write_reasoning_and_commit."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "paper_id": {"type": "string"},
-                "content_markdown": {"type": "string", "description": "Body (markdown)"},
-                "github_file_url": {
-                    "type": "string",
-                    "description": "GitHub blob/raw URL to a reasoning file in your agent repo.",
-                },
-                "parent_id": {
-                    "type": "string",
-                    "description": "Comment ID to reply to. Omit for a new top-level thread.",
-                },
-            },
-            "required": ["paper_id", "content_markdown", "github_file_url"],
-        },
-    },
-    {
-        "name": "post_verdict",
-        "description": (
-            "Submit a final verdict on a paper (only allowed during 'deliberating' phase). "
-            "You must have posted >=1 comment on this paper during 'in_review' or you get 403. "
-            "content_markdown must cite at least 5 distinct [[comment:<uuid>]] references "
-            "from OTHER agents (not your OpenReview ID). Verdict is immutable."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "paper_id": {"type": "string"},
-                "score": {
-                    "type": "number",
-                    "description": "0-10 float. Calibrate to scientific impact, not inflation.",
-                },
-                "content_markdown": {
-                    "type": "string",
-                    "description": "Verdict body with >=5 [[comment:<uuid>]] citations embedded.",
-                },
-                "github_file_url": {
-                    "type": "string",
-                    "description": "GitHub URL documenting verdict reasoning.",
-                },
-                "bad_contribution_agent_id": {
-                    "type": "string",
-                    "description": "Optional — flag ONE agent as bad. Requires non-empty reason.",
-                },
-                "bad_contribution_reason": {"type": "string"},
-            },
-            "required": ["paper_id", "score", "content_markdown", "github_file_url"],
-        },
-    },
-    {
-        "name": "get_actor_profile",
-        "description": "Get your own profile (karma, strikes, description). Also accepts a foreign agent_id.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"agent_id": {"type": "string", "description": "Omit for self"}},
-        },
-    },
-    {
-        "name": "get_notifications",
-        "description": "List unread notifications. Types: REPLY, COMMENT_ON_PAPER, PAPER_DELIBERATING, PAPER_REVIEWED.",
-        "input_schema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "mark_notifications_read",
-        "description": "Mark one or more notifications as read by ID.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "notification_ids": {"type": "array", "items": {"type": "string"}},
-            },
-            "required": ["notification_ids"],
-        },
-    },
-    {
-        "name": "get_unread_count",
-        "description": "Return the count of unread notifications. Cheap — call at the top of every turn.",
-        "input_schema": {"type": "object", "properties": {}},
-    },
-]
+
+async def fetch_koala_schemas(koala: KoalaClient) -> list[dict[str, Any]]:
+    """Pull the current tool catalog from Koala and translate to Anthropic format.
+
+    MCP tool schema uses `inputSchema` (camelCase) while Anthropic expects
+    `input_schema` (snake_case). We also record names into _KOALA_TOOL_NAMES
+    so the dispatcher knows which calls to forward vs handle locally.
+    """
+    raw = await koala.list_tools()
+    out: list[dict[str, Any]] = []
+    _KOALA_TOOL_NAMES.clear()
+    for t in raw:
+        name = t.get("name")
+        if not name:
+            continue
+        _KOALA_TOOL_NAMES.add(name)
+        out.append(
+            {
+                "name": name,
+                "description": t.get("description", ""),
+                "input_schema": t.get("inputSchema") or t.get("input_schema") or {"type": "object", "properties": {}},
+            }
+        )
+    log.info("koala_schemas_loaded", count=len(out), names=sorted(_KOALA_TOOL_NAMES))
+    return out
 
 # ---------------------------------------------------------------------------
 # Local tool schemas
@@ -304,8 +201,10 @@ LOCAL_TOOL_SCHEMAS: list[dict[str, Any]] = [
 ]
 
 
-def all_tool_schemas() -> list[dict[str, Any]]:
-    return KOALA_TOOL_SCHEMAS + LOCAL_TOOL_SCHEMAS
+async def all_tool_schemas(koala: KoalaClient) -> list[dict[str, Any]]:
+    """Assemble the full tool catalog: live Koala schemas + hard-coded local tools."""
+    koala_schemas = await fetch_koala_schemas(koala)
+    return koala_schemas + LOCAL_TOOL_SCHEMAS
 
 
 # ---------------------------------------------------------------------------
@@ -441,19 +340,17 @@ LOCAL_HANDLERS: dict[str, Callable[[dict[str, Any]], Awaitable[str]]] = {
     "record_trajectory": _handle_record_trajectory,
 }
 
-KOALA_TOOL_NAMES = {t["name"] for t in KOALA_TOOL_SCHEMAS}
-
-
 @dataclass
 class Dispatcher:
     koala: KoalaClient
 
     async def dispatch(self, tool_name: str, tool_input: dict[str, Any]) -> str:
-        """Route a tool call to its handler. Errors are stringified so the LLM
-        sees them and can decide to retry or switch approach."""
+        """Route a tool call. Koala names are resolved against the live schema
+        set populated by fetch_koala_schemas(). Errors are stringified so the
+        LLM can react rather than crashing the loop."""
         log.debug("tool_dispatch", tool=tool_name)
         try:
-            if tool_name in KOALA_TOOL_NAMES:
+            if tool_name in _KOALA_TOOL_NAMES:
                 result = await self.koala.call_tool(tool_name, tool_input)
                 return result if result else "(empty response)"
             if tool_name in LOCAL_HANDLERS:

@@ -29,6 +29,9 @@ class KoalaClient:
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
+            # MCP Streamable HTTP transport allows both JSON and SSE responses.
+            # Koala's Uvicorn gateway returns 406 without an explicit Accept.
+            "Accept": "application/json, text/event-stream",
         }
         self._id = 0
         self._client = httpx.AsyncClient(timeout=60.0)
