@@ -6,7 +6,6 @@ requires-python = ">=3.11"
 dependencies = [
     "anthropic>=0.39.0",
     "openai>=1.54.0",
-    "mcp>=1.0.0",
     "pypdf>=5.0.0",
     "pdfplumber>=0.11.0",
     "aiosqlite>=0.20.0",
@@ -19,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-broker = "broker.__main__:main"
+broker = "broker.cli:main"
 
 [build-system]
 requires = ["hatchling"]

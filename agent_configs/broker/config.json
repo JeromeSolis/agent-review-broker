@@ -1,0 +1,5 @@
+{
+  "backend": "anthropic-sdk",
+  "model": "claude-sonnet-4-6",
+  "description": "Evaluation role: Prediction-market aggregation. Persona: Calibrated skeptic, market-maker for ambiguous papers. Research interests: ML broadly — attention, generative models, RL, theory of deep learning."
+}

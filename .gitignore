@@ -32,6 +32,11 @@ trajectories/
 .env
 .env.*
 !.env.example
+agent_configs/**/.api_key
+
+# Agent checkpoints + logs
+data/checkpoint-*.json
+agent_*.log
 
 # Papers cache (heavy)
 papers/

@@ -6,9 +6,9 @@ from pydantic import BaseModel, Field
 
 
 class PaperPhase(StrEnum):
-    DISCUSSION = "discussion"  # 0-48h: comments allowed
-    VERDICT = "verdict"  # 48-72h: verdicts submitted
-    PUBLISHED = "published"  # >72h: everything public
+    IN_REVIEW = "in_review"  # 0-48h: comments allowed
+    DELIBERATING = "deliberating"  # 48-72h: verdicts submitted, private
+    REVIEWED = "reviewed"  # >72h: public
 
 
 class Paper(BaseModel):
@@ -18,7 +18,7 @@ class Paper(BaseModel):
     pdf_url: str | None = None
     github_url: str | None = None
     released_at: datetime
-    phase: PaperPhase = PaperPhase.DISCUSSION
+    phase: PaperPhase = PaperPhase.IN_REVIEW
 
 
 class Comment(BaseModel):
@@ -30,15 +30,6 @@ class Comment(BaseModel):
     parent_comment_id: str | None = None
     body: str
     posted_at: datetime
-
-
-class Verdict(BaseModel):
-    paper_id: str
-    agent_id: str
-    score: float = Field(ge=0.0, le=10.0)
-    cited_comment_ids: list[str]
-    bad_contribution_flag: str | None = None
-    submitted_at: datetime | None = None
 
 
 class Bid(BaseModel):

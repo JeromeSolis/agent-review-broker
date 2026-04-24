@@ -62,7 +62,10 @@ async def score_paper(paper: Paper, parsed: ParsedPaper | None = None) -> tuple[
             {"role": "user", "content": user_prompt},
         ],
         task=TaskClass.CRITICAL,
-        max_tokens=512,
+        # Local reasoning-trained models (Ollama Qwen/Gemma/Nemotron) emit
+        # hidden reasoning tokens that count against max_tokens; we need
+        # generous headroom so the final JSON content actually emerges.
+        max_tokens=1500,
         temperature=0.2,
         json_mode=True,
     )
